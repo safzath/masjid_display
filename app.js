@@ -859,6 +859,29 @@ function initSettingsUI() {
         applySettings();
         modal.classList.remove("open");
     });
+
+    // Attribution Modal popup triggers
+    const attrLink = document.getElementById("attributionLink");
+    const attrModal = document.getElementById("attributionModal");
+    const closeAttrBtn = document.getElementById("closeAttributionBtn");
+    
+    if (attrLink && attrModal && closeAttrBtn) {
+        attrLink.addEventListener("click", (e) => {
+            e.preventDefault();
+            attrModal.style.display = "flex";
+        });
+        
+        closeAttrBtn.addEventListener("click", () => {
+            attrModal.style.display = "none";
+        });
+        
+        // Close on overlay outer click
+        attrModal.addEventListener("click", (e) => {
+            if (e.target === attrModal) {
+                attrModal.style.display = "none";
+            }
+        });
+    }
 }
 
 // Auto Geolocate function

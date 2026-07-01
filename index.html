@@ -458,12 +458,28 @@
             </div>
 
             <div class="modal-footer">
-                <a href="https://linktr.ee/saliitcare" target="_blank" rel="noopener noreferrer" class="attribution">By Sali IT Care</a>
+                <a href="#" class="attribution" id="attributionLink">By Sali IT Care</a>
                 <div style="display: flex; gap: 1rem;">
                     <button class="btn btn-secondary" id="resetSettingsBtn">Reset Defaults</button>
                     <button class="btn btn-primary" id="saveSettingsBtn">Save & Apply Settings</button>
                 </div>
             </div>
+        </div>
+    </div>
+
+    <!-- Attribution Info Popup Modal -->
+    <div class="settings-overlay" id="attributionModal" style="display: none; z-index: 2000;">
+        <div class="settings-modal-card" style="max-width: 450px; text-align: center; padding: 2rem; gap: 1.5rem;">
+            <div style="font-size: 3rem; animation: float 6s ease-in-out infinite;">❤️</div>
+            <p style="font-size: 1.25rem; font-weight: 700; line-height: 1.5; color: var(--text-main);">
+                This Project is Completely Free For the sake of Allah Subhanahu wa Ta'ala
+            </p>
+            <hr style="border: 0; height: 1px; background: rgba(255,255,255,0.08); width: 100%;">
+            <div>
+                <h4 style="font-size: 0.95rem; color: var(--accent-color); margin-bottom: 0.4rem; text-transform: uppercase; letter-spacing: 0.5px;">About Sali IT Care</h4>
+                <a href="https://linktr.ee/saliitcare" target="_blank" rel="noopener noreferrer" style="color: var(--primary-color); font-weight: 700; text-decoration: none; font-size: 1.1rem; transition: color 0.2s ease;" onmouseover="this.style.color='var(--accent-color)'" onmouseout="this.style.color='var(--primary-color)'">linktr.ee/saliitcare</a>
+            </div>
+            <button class="btn btn-primary" id="closeAttributionBtn" style="width: 100%; margin-top: 1rem;">Close</button>
         </div>
     </div>
 
