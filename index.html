@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mosque Digital Display</title>
+    <meta name="description" content="A premium, customizable digital display for mosque prayer times and announcements.">
+    <!-- Google Fonts: Cairo for Arabic/bilingual headings, Inter for clean modern UI numbers -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@300;400;600;700;800&family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="display-container" id="appDisplay">
+        <!-- Top Bar / Header -->
+        <header class="top-bar">
+            <div class="mosque-info">
+                <span class="logo-icon">🕌</span>
+                <h1 id="mosqueNameDisplay">Sali Islamic Center</h1>
+            </div>
+            
+            <div class="main-clock-container">
+                <div class="main-time" id="currentTime">00:00:00</div>
+                <div class="time-ampm" id="currentAmPm">--</div>
+            </div>
+
+            <div class="date-container">
+                <div class="hijri-date" id="hijriDateDisplay">-- --------- ----</div>
+                <div class="gregorian-date" id="gregorianDateDisplay">Loading date...</div>
+            </div>
+        </header>
+
+        <!-- Countdown / Announcement Banner -->
+        <div class="banner-container">
+            <div class="countdown-card" id="countdownCard">
+                <span class="countdown-label" id="countdownLabel">Next Prayer:</span>
+                <span class="countdown-value" id="countdownValue">--:--:--</span>
+            </div>
+        </div>
+
+        <!-- Prayer Times Grid -->
+        <main class="prayer-grid">
+            <!-- Fajr -->
+            <div class="prayer-card" id="card-fajr">
+                <div class="active-indicator"></div>
+                <div class="prayer-names">
+                    <span class="prayer-english">Fajr</span>
+                    <span class="prayer-arabic">الفجر</span>
+                </div>
+                <div class="prayer-time-display" id="time-fajr">--:--</div>
+                <div class="iqamah-time-display">
+                    <span class="iqamah-label">Iqamah</span>
+                    <span class="iqamah-val" id="iqamah-fajr">--:--</span>
+                </div>
+            </div>
+
+            <!-- Sunrise -->
+            <div class="prayer-card shuruq-card" id="card-sunrise">
+                <div class="active-indicator"></div>
+                <div class="prayer-names">
+                    <span class="prayer-english">Sunrise</span>
+                    <span class="prayer-arabic">الشروق</span>
+                </div>
+                <div class="prayer-time-display" id="time-sunrise">--:--</div>
+                <div class="iqamah-time-display">
+                    <span class="iqamah-label">Shuruq</span>
+                    <span class="iqamah-val" style="color: var(--text-muted);">No Prayer</span>
+                </div>
+            </div>
+
+            <!-- Dhuhr -->
+            <div class="prayer-card" id="card-dhuhr">
+                <div class="active-indicator"></div>
+                <div class="prayer-names">
+                    <span class="prayer-english">Dhuhr</span>
+                    <span class="prayer-arabic">الظهر</span>
+                </div>
+                <div class="prayer-time-display" id="time-dhuhr">--:--</div>
+                <div class="iqamah-time-display">
+                    <span class="iqamah-label">Iqamah</span>
+                    <span class="iqamah-val" id="iqamah-dhuhr">--:--</span>
+                </div>
+            </div>
+
+            <!-- Asr -->
+            <div class="prayer-card" id="card-asr">
+                <div class="active-indicator"></div>
+                <div class="prayer-names">
+                    <span class="prayer-english">Asr</span>
+                    <span class="prayer-arabic">العصر</span>
+                </div>
+                <div class="prayer-time-display" id="time-asr">--:--</div>
+                <div class="iqamah-time-display">
+                    <span class="iqamah-label">Iqamah</span>
+                    <span class="iqamah-val" id="iqamah-asr">--:--</span>
+                </div>
+            </div>
+
+            <!-- Maghrib -->
+            <div class="prayer-card" id="card-maghrib">
+                <div class="active-indicator"></div>
+                <div class="prayer-names">
+                    <span class="prayer-english">Maghrib</span>
+                    <span class="prayer-arabic">المغرب</span>
+                </div>
+                <div class="prayer-time-display" id="time-maghrib">--:--</div>
+                <div class="iqamah-time-display">
+                    <span class="iqamah-label">Iqamah</span>
+                    <span class="iqamah-val" id="iqamah-maghrib">--:--</span>
+                </div>
+            </div>
+
+            <!-- Isha -->
+            <div class="prayer-card" id="card-isha">
+                <div class="active-indicator"></div>
+                <div class="prayer-names">
+                    <span class="prayer-english">Isha</span>
+                    <span class="prayer-arabic">العشاء</span>
+                </div>
+                <div class="prayer-time-display" id="time-isha">--:--</div>
+                <div class="iqamah-time-display">
+                    <span class="iqamah-label">Iqamah</span>
+                    <span class="iqamah-val" id="iqamah-isha">--:--</span>
+                </div>
+            </div>
+        </main>
+
+        <!-- Bottom Banner / Announcements -->
+        <footer class="bottom-marquee">
+            <div class="ticker-wrap">
+                <div class="ticker-content" id="hadithTicker">
+                    Loading daily reminders...
+                </div>
+            </div>
+        </footer>
+
+        <!-- Settings Button (Hidden standardly, appears on hover / keyboard trigger 'S') -->
+        <button class="settings-trigger" id="settingsBtn" title="Settings (Press 'S')">⚙️</button>
+    </div>
+
+    <!-- Settings Overlay Modal -->
+    <div class="settings-overlay" id="settingsModal">
+        <div class="settings-modal-card">
+            <div class="modal-header">
+                <h2>⚙️ Mosque Display Settings</h2>
+                <button class="modal-close" id="closeSettingsBtn">✕</button>
+            </div>
+            
+            <div class="settings-tabs">
+                <button class="tab-btn active" data-tab="tab-location">Location</button>
+                <button class="tab-btn" data-tab="tab-iqamah">Iqamah Offsets</button>
+                <button class="tab-btn" data-tab="tab-design">Design & Theme</button>
+                <button class="tab-btn" data-tab="tab-announcements">Announcements</button>
+            </div>
+
+            <div class="settings-content">
+                <!-- Location Tab -->
+                <div class="tab-panel active" id="tab-location">
+                    <div class="form-row">
+                        <label for="locationMode">Location Preset / Mode</label>
+                        <select id="locationMode">
+                            <option value="auto">Detect My Location (GPS)</option>
+                            <option value="custom" selected>Manual Coordinates</option>
+                            <option value="london">London, UK</option>
+                            <option value="mecca">Mecca, Saudi Arabia</option>
+                            <option value="jakarta">Jakarta, Indonesia</option>
+                            <option value="newyork">New York, USA</option>
+                            <option value="cairo">Cairo, Egypt</option>
+                        </select>
+                    </div>
+
+                    <div id="manualCoordinatesSection">
+                        <div class="form-group-row">
+                            <div class="form-group">
+                                <label for="latInput">Latitude</label>
+                                <input type="number" id="latInput" step="any" value="30.0444">
+                            </div>
+                            <div class="form-group">
+                                <label for="lngInput">Longitude</label>
+                                <input type="number" id="lngInput" step="any" value="31.2357">
+                            </div>
+                            <div class="form-group">
+                                <label for="tzInput">Timezone Offset (hrs)</label>
+                                <input type="number" id="tzInput" step="0.5" value="2">
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="form-row">
+                        <label for="calcMethod">Calculation Method</label>
+                        <select id="calcMethod">
+                            <option value="MuslimWorldLeague">Muslim World League (MWL)</option>
+                            <option value="NorthAmerica">ISNA (North America)</option>
+                            <option value="Egyptian">Egyptian General Authority</option>
+                            <option value="UmmAlQura">Umm al-Qura (Mecca)</option>
+                            <option value="Karachi">University of Islamic Sciences, Karachi</option>
+                            <option value="Gulf">Gulf Region</option>
+                            <option value="Dubai">Dubai</option>
+                            <option value="Singapore">MUIS (Singapore)</option>
+                            <option value="Turkey">Diyanet (Turkey)</option>
+                            <option value="Tehran">Institute of Geophysics, Tehran</option>
+                        </select>
+                    </div>
+
+                    <div class="form-row">
+                        <label for="madhab">Asr Calculation Madhab</label>
+                        <select id="madhab">
+                            <option value="Shafi">Standard (Shafi'i, Maliki, Hanbali)</option>
+                            <option value="Hanafi">Hanafi</option>
+                        </select>
+                    </div>
+                </div>
+
+                <!-- Iqamah Tab -->
+                <div class="tab-panel" id="tab-iqamah">
+                    <p class="tab-desc">Specify the offset in minutes after the Azan for the Iqamah call, or set to fixed time.</p>
+                    
+                    <div class="iqamah-settings-grid">
+                        <div class="form-group">
+                            <label for="fajrIqamah">Fajr Offset (min)</label>
+                            <input type="number" id="fajrIqamah" min="0" max="60" value="20">
+                        </div>
+                        <div class="form-group">
+                            <label for="dhuhrIqamah">Dhuhr Offset (min)</label>
+                            <input type="number" id="dhuhrIqamah" min="0" max="60" value="15">
+                        </div>
+                        <div class="form-group">
+                            <label for="asrIqamah">Asr Offset (min)</label>
+                            <input type="number" id="asrIqamah" min="0" max="60" value="15">
+                        </div>
+                        <div class="form-group">
+                            <label for="maghribIqamah">Maghrib Offset (min)</label>
+                            <input type="number" id="maghribIqamah" min="0" max="60" value="10">
+                        </div>
+                        <div class="form-group">
+                            <label for="ishaIqamah">Isha Offset (min)</label>
+                            <input type="number" id="ishaIqamah" min="0" max="60" value="15">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Design Tab -->
+                <div class="tab-panel" id="tab-design">
+                    <div class="form-row">
+                        <label for="mosqueNameInput">Mosque Name</label>
+                        <input type="text" id="mosqueNameInput" value="Sali Islamic Center">
+                    </div>
+
+                    <div class="form-row">
+                        <label for="themePreset">Color Theme</label>
+                        <select id="themePreset">
+                            <option value="emerald">Emerald Dome (Green & Gold)</option>
+                            <option value="kaaba">Midnight Kaaba (Gold & Charcoal)</option>
+                            <option value="royal">Royal Indigo (Blue & Silver)</option>
+                            <option value="sunset">Sunset Sand (Amber & Sand)</option>
+                            <option value="custom">Custom Theme</option>
+                        </select>
+                    </div>
+
+                    <!-- Custom Theme Colors (visible if custom selected) -->
+                    <div id="customColorsSection" style="display: none;">
+                        <div class="form-group-row">
+                            <div class="form-group">
+                                <label for="colorPrimary">Primary Color</label>
+                                <input type="color" id="colorPrimary" value="#0f766e">
+                            </div>
+                            <div class="form-group">
+                                <label for="colorAccent">Accent Color</label>
+                                <input type="color" id="colorAccent" value="#eab308">
+                            </div>
+                            <div class="form-group">
+                                <label for="colorBg">Background Dark</label>
+                                <input type="color" id="colorBg" value="#022c22">
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="form-row">
+                        <label for="bgImageMode">Background Wallpaper</label>
+                        <select id="bgImageMode">
+                            <option value="default">Elegant Pattern (Default)</option>
+                            <option value="geometric">Islamic Geometric</option>
+                            <option value="stars">Starry Night Sky</option>
+                            <option value="local">Stunning Mosque Graphic (Local)</option>
+                            <option value="custom">Custom Image URL</option>
+                        </select>
+                    </div>
+
+                    <div class="form-row" id="customBgUrlSection" style="display: none;">
+                        <label for="customBgUrl">Custom Background Image URL</label>
+                        <input type="url" id="customBgUrl" placeholder="https://example.com/mosque.jpg">
+                    </div>
+                </div>
+
+                <!-- Announcements Tab -->
+                <div class="tab-panel" id="tab-announcements">
+                    <div class="form-row">
+                        <label for="announcementTicker">Announcement / Hadith Ticker Text</label>
+                        <textarea id="announcementTicker" rows="4" placeholder="Enter messages separated by a vertical bar (|). E.g. Hadith: Actions are judged by intentions. | Friday Prayer at 1:15 PM."></textarea>
+                    </div>
+                    <div class="ticker-preview-box">
+                        <strong>Preview:</strong>
+                        <div class="preview-marquee"><span id="tickerPreviewText">Loading preview...</span></div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="modal-footer" style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
+                <span class="attribution" style="color: var(--text-muted); font-size: 0.85rem; font-weight: 500;">By Sali IT Care</span>
+                <div style="display: flex; gap: 1rem;">
+                    <button class="btn btn-secondary" id="resetSettingsBtn">Reset Defaults</button>
+                    <button class="btn btn-primary" id="saveSettingsBtn">Save & Apply Settings</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Audio Alerts for Iqamah/Adhan -->
+    <audio id="beepAlert" src="https://assets.mixkit.co/active_storage/sfx/2869/2869-84.wav" preload="auto"></audio>
+
+    <!-- Include Adhan.js Library (UMD version) so it works offline/locally without local server CORS issues -->
+    <script src="https://cdn.jsdelivr.net/npm/adhan/lib/bundles/adhan.umd.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>
