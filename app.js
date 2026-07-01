@@ -1,6 +1,7 @@
 /* ==========================================================================
-   Mosque Digital Display JS - Time Calculations & Settings Management
+   Sali Mosque Digital Display JS - Advanced calculations, Calibrations & UI
    ========================================================================== */
+
 // Destructure classes from the global adhan object (loaded via script tag in index.html)
 const { 
     Coordinates, 
@@ -25,6 +26,18 @@ const DEFAULT_SETTINGS = {
         maghrib: 10,
         isha: 15
     },
+    salahDuration: 15,
+    jummahTime1: "12:30 PM",
+    jummahTime2: "1:30 PM",
+    hijriOffset: 0,
+    offsets: {
+        fajr: 0,
+        sunrise: 0,
+        dhuhr: 0,
+        asr: 0,
+        maghrib: 0,
+        isha: 0
+    },
     themePreset: "emerald",
     customColors: {
         primary: "#0f766e",
@@ -33,7 +46,11 @@ const DEFAULT_SETTINGS = {
     },
     bgImageMode: "default",
     customBgUrl: "",
-    announcements: "Hadith: Actions are judged by intentions. | Friday Prayer at 1:15 PM. | Quran: Indeed, prayer prohibits immorality and wrongdoing [29:45]. | Please silence your mobile phones in the prayer hall."
+    announcements: "Hadith: Actions are judged by intentions. | Friday Prayer at 1:15 PM. | Quran: Indeed, prayer prohibits immorality and wrongdoing [29:45]. | Please silence your mobile phones in the prayer hall.",
+    urgentAlert: "",
+    donationUrl: "https://linktr.ee/saliitcare",
+    donationText: "Your donations sustain our community. Scan to contribute.",
+    classesText: "Join Sali Islamic classes: Tafsir circle every Saturday after Asr."
 };
 
 // City presets coordinates and default calculation methods
@@ -45,19 +62,31 @@ const CITY_PRESETS = {
     cairo: { lat: 30.0444, lng: 31.2357, tz: 3, method: "Egyptian" }
 };
 
-// State variable
+// Application state
 let settings = { ...DEFAULT_SETTINGS };
 let currentActivePrayer = null;
+let weatherCache = { temp: "--", desc: "Loading...", icon: "⛅", lastUpdated: 0 };
+
+// Salah Overlay states
+let isSalahOverlayActive = false;
+let salahTimerInterval = null;
+let salahTimeRemaining = 0; // seconds
 
 // Initialize app when DOM loaded
 document.addEventListener("DOMContentLoaded", () => {
     loadSettings();
     initSettingsUI();
+    initSlideshow();
+    initSalahOverlayDismiss();
     applySettings();
     
-    // Start main time and calculation loops
+    // Start main clock and prayer computation loop
     updateTimeAndPrayers();
     setInterval(updateTimeAndPrayers, 1000);
+
+    // Weather loop: Fetch weather on load, and then hourly
+    fetchWeather();
+    setInterval(fetchWeather, 3600000);
 });
 
 // Load settings from localStorage
@@ -65,13 +94,14 @@ function loadSettings() {
     const saved = localStorage.getItem("mosque_display_settings");
     if (saved) {
         try {
-            settings = JSON.parse(saved);
-            // Ensure any missing properties from updates get default values
-            settings = { ...DEFAULT_SETTINGS, ...settings };
-            settings.iqamahOffsets = { ...DEFAULT_SETTINGS.iqamahOffsets, ...settings.iqamahOffsets };
-            settings.customColors = { ...DEFAULT_SETTINGS.customColors, ...settings.customColors };
+            const parsed = JSON.parse(saved);
+            settings = { ...DEFAULT_SETTINGS, ...parsed };
+            // Ensure nested objects preserve default fallbacks
+            settings.iqamahOffsets = { ...DEFAULT_SETTINGS.iqamahOffsets, ...parsed.iqamahOffsets };
+            settings.offsets = { ...DEFAULT_SETTINGS.offsets, ...parsed.offsets };
+            settings.customColors = { ...DEFAULT_SETTINGS.customColors, ...parsed.customColors };
         } catch (e) {
-            console.error("Error parsing saved settings, resetting to defaults", e);
+            console.error("Error parsing saved settings, resetting defaults", e);
             settings = { ...DEFAULT_SETTINGS };
         }
     }
@@ -88,10 +118,13 @@ function applySettings() {
     document.getElementById("mosqueNameDisplay").textContent = settings.mosqueName;
 
     // 2. Apply theme colors & container class
-    const appDisplay = document.getElementById("appDisplay");
+    const body = document.body;
     
     // Clear theme classes
-    appDisplay.classList.remove("theme-kaaba", "theme-royal", "theme-sunset");
+    body.classList.remove(
+        "theme-kaaba", "theme-royal", "theme-sunset", 
+        "theme-ivory", "theme-amber", "theme-mint"
+    );
     
     if (settings.themePreset === "custom") {
         document.documentElement.style.setProperty('--primary-color', settings.customColors.primary);
@@ -110,7 +143,7 @@ function applySettings() {
         document.documentElement.style.removeProperty('--bg-gradient');
         
         if (settings.themePreset !== "emerald") {
-            appDisplay.classList.add(`theme-${settings.themePreset}`);
+            body.classList.add(`theme-${settings.themePreset}`);
         }
     }
 
@@ -136,11 +169,37 @@ function applySettings() {
         tickerContent.appendChild(item);
     });
 
+    // 5. Update Urgent Announcement Banner
+    const urgentBar = document.getElementById("urgentAlertBar");
+    const urgentTextEl = document.getElementById("urgentAlertText");
+    if (settings.urgentAlert && settings.urgentAlert.trim().length > 0) {
+        urgentTextEl.textContent = settings.urgentAlert;
+        urgentBar.style.display = "flex";
+    } else {
+        urgentBar.style.display = "none";
+    }
+
+    // 6. Update Weather immediately
+    updateWeatherUI();
+    fetchWeather();
+
+    // 7. Update slide contents dynamically (Donation QR code and weekly classes)
+    const donationTextEl = document.getElementById("donationTextDisplay");
+    if (donationTextEl) donationTextEl.textContent = settings.donationText;
+
+    const classesTextEl = document.getElementById("classesTextDisplay");
+    if (classesTextEl) classesTextEl.textContent = settings.classesText;
+
+    const qrImg = document.getElementById("donationQrImg");
+    if (qrImg && settings.donationUrl) {
+        qrImg.src = `https://api.qrserver.com/v1/create-qr-code/?size=120x120&data=${encodeURIComponent(settings.donationUrl)}`;
+    }
+
     // Re-calculate prayer times immediately with new settings
     calculatePrayerTimes();
 }
 
-// Convert HEX to RGBA for Glow Effects
+// Convert HEX to RGBA helper
 function hexToRgbA(hex, alpha) {
     let c;
     if (/^#([A-Fa-f0-9]{3}){1,2}$/.test(hex)) {
@@ -157,13 +216,34 @@ function hexToRgbA(hex, alpha) {
 // Helper to pad numbers
 const pad = (num, size = 2) => num.toString().padStart(size, '0');
 
+// Helper to add minutes to date
+function addMinutes(date, minutes) {
+    return new Date(date.getTime() + minutes * 60000);
+}
+
+// Calculate Qibla direction
+function getQiblaDirection(lat1, lon1) {
+    const lat2 = 21.4225 * (Math.PI / 180);
+    const lon2 = 39.8262 * (Math.PI / 180);
+    
+    const phi1 = lat1 * (Math.PI / 180);
+    const phi2 = lat2;
+    const deltaLambda = (39.8262 - lon1) * (Math.PI / 180);
+
+    const y = Math.sin(deltaLambda) * Math.cos(phi2);
+    const x = Math.cos(phi1) * Math.sin(phi2) - 
+              Math.sin(phi1) * Math.cos(phi2) * Math.cos(deltaLambda);
+
+    let bearing = Math.atan2(y, x) * (180 / Math.PI);
+    return (bearing + 360) % 360;
+}
+
 // Main Calculation Loop
 function calculatePrayerTimes() {
-    // 1. Coordinates and Params
     let lat = parseFloat(settings.latitude);
     let lng = parseFloat(settings.longitude);
     
-    // Auto-detect override or presets
+    // Auto-detect overrides
     if (settings.locationMode && settings.locationMode !== "custom" && settings.locationMode !== "auto") {
         const preset = CITY_PRESETS[settings.locationMode];
         if (preset) {
@@ -174,7 +254,14 @@ function calculatePrayerTimes() {
 
     const coordinates = new Coordinates(lat, lng);
     
-    // Get adhan calculation parameters
+    // Qibla calculation
+    const qiblaHeading = getQiblaDirection(lat, lng);
+    const qiblaEl = document.getElementById("qiblaDisplay");
+    if (qiblaEl) {
+        qiblaEl.textContent = `Qibla: ${qiblaHeading.toFixed(1)}° from North 🧭`;
+    }
+    
+    // Calculation settings parameter
     let params;
     if (settings.locationMode && settings.locationMode !== "custom" && settings.locationMode !== "auto") {
         const preset = CITY_PRESETS[settings.locationMode];
@@ -183,39 +270,65 @@ function calculatePrayerTimes() {
         params = CalculationMethod[settings.calcMethod]();
     }
 
-    // Madhab adjustment
     params.madhab = settings.madhab === "Hanafi" ? Madhab.Hanafi : Madhab.Shafi;
 
-    // 2. Fetch Time for current day (at target offset)
+    // Time targeting
     const systemDate = new Date();
-    // Calculate date at targeted timezone to prevent mismatch issues when running on different locale systems
     const utcDate = new Date(systemDate.getTime() + systemDate.getTimezoneOffset() * 60000);
     const targetDate = new Date(utcDate.getTime() + (parseFloat(settings.timezone) * 3600000));
 
     const prayerTimes = new PrayerTimes(coordinates, targetDate, params);
     
-    // Calculate Iqamah times based on offsets
-    const iqamahTimes = {
-        fajr: addMinutes(prayerTimes.fajr, settings.iqamahOffsets.fajr),
-        dhuhr: addMinutes(prayerTimes.dhuhr, settings.iqamahOffsets.dhuhr),
-        asr: addMinutes(prayerTimes.asr, settings.iqamahOffsets.asr),
-        maghrib: addMinutes(prayerTimes.maghrib, settings.iqamahOffsets.maghrib),
-        isha: addMinutes(prayerTimes.isha, settings.iqamahOffsets.isha)
+    // --- Apply Manual Timings Calibrations/Offsets ---
+    const finalPrayers = {
+        fajr: addMinutes(prayerTimes.fajr, settings.offsets.fajr),
+        sunrise: addMinutes(prayerTimes.sunrise, settings.offsets.sunrise),
+        dhuhr: addMinutes(prayerTimes.dhuhr, settings.offsets.dhuhr),
+        asr: addMinutes(prayerTimes.asr, settings.offsets.asr),
+        maghrib: addMinutes(prayerTimes.maghrib, settings.offsets.maghrib),
+        isha: addMinutes(prayerTimes.isha, settings.offsets.isha)
     };
 
-    // 3. Display Times in cards
-    updateCardTimes(prayerTimes, iqamahTimes);
+    // Calculate Iqamah times based on offsets
+    const iqamahTimes = {
+        fajr: addMinutes(finalPrayers.fajr, settings.iqamahOffsets.fajr),
+        dhuhr: addMinutes(finalPrayers.dhuhr, settings.iqamahOffsets.dhuhr),
+        asr: addMinutes(finalPrayers.asr, settings.iqamahOffsets.asr),
+        maghrib: addMinutes(finalPrayers.maghrib, settings.iqamahOffsets.maghrib),
+        isha: addMinutes(finalPrayers.isha, settings.iqamahOffsets.isha)
+    };
 
-    // 4. Find Active & Next Prayer
-    determineActiveAndNextPrayer(prayerTimes, iqamahTimes, targetDate, coordinates, params);
+    // --- Friday Jummah Mode adaptations ---
+    const isFriday = targetDate.getDay() === 5;
+    const dhuhrCard = document.getElementById("card-dhuhr");
+    const normalDhuhrIqamahBox = document.getElementById("normalDhuhrIqamahBox");
+    const jummahSessionsBox = document.getElementById("jummahSessionsBox");
+    const dhuhrTitleEnglish = document.getElementById("dhuhrTitleEnglish");
+    const dhuhrTitleArabic = document.getElementById("dhuhrTitleArabic");
+
+    if (isFriday) {
+        dhuhrTitleEnglish.textContent = "Jummah";
+        dhuhrTitleArabic.textContent = "الجمعة";
+        normalDhuhrIqamahBox.style.display = "none";
+        
+        document.getElementById("jummahSession1Val").textContent = settings.jummahTime1;
+        document.getElementById("jummahSession2Val").textContent = settings.jummahTime2;
+        jummahSessionsBox.style.display = "flex";
+    } else {
+        dhuhrTitleEnglish.textContent = "Dhuhr";
+        dhuhrTitleArabic.textContent = "الظهر";
+        jummahSessionsBox.style.display = "none";
+        normalDhuhrIqamahBox.style.display = "flex";
+    }
+
+    // Display times inside card items
+    updateCardTimes(finalPrayers, iqamahTimes);
+
+    // Determine Active, Next and Iqamah states
+    determineActiveAndNextPrayer(finalPrayers, iqamahTimes, targetDate, coordinates, params, isFriday);
 }
 
-// Add minutes to a date helper
-function addMinutes(date, minutes) {
-    return new Date(date.getTime() + minutes * 60000);
-}
-
-// Update the DOM cards with values
+// Update card elements
 function updateCardTimes(prayers, iqamahs) {
     document.getElementById("time-fajr").textContent = formatClockTime(prayers.fajr);
     document.getElementById("iqamah-fajr").textContent = formatClockTime(iqamahs.fajr);
@@ -235,23 +348,23 @@ function updateCardTimes(prayers, iqamahs) {
     document.getElementById("iqamah-isha").textContent = formatClockTime(iqamahs.isha);
 }
 
-// Format Date object to HH:MM format
+// Format date to readable clock string
 function formatClockTime(date) {
     if (!date) return "--:--";
     let hours = date.getHours();
     let minutes = date.getMinutes();
     const ampm = hours >= 12 ? 'PM' : 'AM';
     hours = hours % 12;
-    hours = hours ? hours : 12; // 0 becomes 12
+    hours = hours ? hours : 12;
     return `${pad(hours)}:${pad(minutes)} ${ampm}`;
 }
 
-// Main state logic to determine current active prayer card and set next prayer countdown banner
-function determineActiveAndNextPrayer(prayers, iqamahs, now, coordinates, params) {
+// Logic flow for active / next prayer and Iqamah timings
+function determineActiveAndNextPrayer(prayers, iqamahs, now, coordinates, params, isFriday) {
     const timeList = [
         { name: "fajr", azan: prayers.fajr, iqamah: iqamahs.fajr },
         { name: "sunrise", azan: prayers.sunrise, iqamah: null },
-        { name: "dhuhr", azan: prayers.dhuhr, iqamah: iqamahs.dhuhr },
+        { name: "dhuhr", azan: prayers.dhuhr, iqamah: isFriday ? null : iqamahs.dhuhr }, // No normal Iqamah on Friday
         { name: "asr", azan: prayers.asr, iqamah: iqamahs.asr },
         { name: "maghrib", azan: prayers.maghrib, iqamah: iqamahs.maghrib },
         { name: "isha", azan: prayers.isha, iqamah: iqamahs.isha }
@@ -259,21 +372,20 @@ function determineActiveAndNextPrayer(prayers, iqamahs, now, coordinates, params
 
     const nowMs = now.getTime();
     
-    // Find active prayer
-    // An active prayer remains highlighted from its Azan time until the next prayer starts
+    // Find active card index
     let activeIndex = -1;
     for (let i = 0; i < timeList.length; i++) {
         if (nowMs >= timeList[i].azan.getTime()) {
             activeIndex = i;
         }
     }
-    // If before Fajr, the active prayer is Isha from previous day
     if (activeIndex === -1) {
         activeIndex = timeList.length - 1; // Isha
     }
 
-    // Set highlighted card in DOM
     const activePrayer = timeList[activeIndex];
+    
+    // Update active highlight style class in DOM
     if (currentActivePrayer !== activePrayer.name) {
         document.querySelectorAll(".prayer-card").forEach(c => c.classList.remove("active"));
         const card = document.getElementById(`card-${activePrayer.name}`);
@@ -281,49 +393,58 @@ function determineActiveAndNextPrayer(prayers, iqamahs, now, coordinates, params
         currentActivePrayer = activePrayer.name;
     }
 
-    // Calculate next prayer countdown details
-    // Skip Shuruq for next actual prayer countdown list, but show next prayer
+    // Determine target countdown details
     let nextIndex = (activeIndex + 1) % timeList.length;
     let nextPrayer = timeList[nextIndex];
-    
-    // If next prayer is Sunrise, standard count down to next actual prayer is Dhuhr
-    let isSunriseNext = (nextPrayer.name === "sunrise");
-    let actualNextPrayer = isSunriseNext ? timeList[(nextIndex + 1) % timeList.length] : nextPrayer;
+    let actualNextPrayer = (nextPrayer.name === "sunrise") ? timeList[(nextIndex + 1) % timeList.length] : nextPrayer;
 
     let targetCountdownTime = actualNextPrayer.azan;
     let label = `Next: ${actualNextPrayer.name.toUpperCase()}`;
 
-    // Calculate next day offsets if Fajr is next
+    // Adjust for next day Fajr countdowns
     let isNextDay = false;
     if (nowMs >= timeList[timeList.length - 1].azan.getTime() || activeIndex === -1) {
-        // Now is after Isha, next prayer is Fajr tomorrow
         isNextDay = true;
     }
 
     if (isNextDay && actualNextPrayer.name === "fajr") {
-        // Compute Fajr for tomorrow
         const tomorrow = new Date(now.getTime() + 24 * 3600 * 1000);
-        const tomorrowPrayers = new PrayerTimes(coordinates, tomorrow, params);
-        targetCountdownTime = tomorrowPrayers.fajr;
+        const tomorrowBase = new PrayerTimes(coordinates, tomorrow, params);
+        // Apply offsets to tomorrow's Fajr
+        targetCountdownTime = addMinutes(tomorrowBase.fajr, settings.offsets.fajr);
     }
 
     // --- Special Iqamah Countdown Handling ---
-    // If current time is AFTER current prayer's Azan, but BEFORE its Iqamah time
     let inIqamahWindow = false;
-    let iqamahCountdownVal = 0;
-    
-    if (activePrayer.iqamah && nowMs >= activePrayer.azan.getTime() && nowMs < activePrayer.iqamah.getTime()) {
-        inIqamahWindow = true;
-        targetCountdownTime = activePrayer.iqamah;
-        label = `⏳ IQAMAH: ${activePrayer.name.toUpperCase()}`;
+    let currentSalahName = "";
+
+    // 1. Normal Iqamah Window
+    if (!isFriday || activePrayer.name !== "dhuhr") {
+        if (activePrayer.iqamah && nowMs >= activePrayer.azan.getTime() && nowMs < activePrayer.iqamah.getTime()) {
+            inIqamahWindow = true;
+            targetCountdownTime = activePrayer.iqamah;
+            label = `⏳ IQAMAH: ${activePrayer.name.toUpperCase()}`;
+            currentSalahName = activePrayer.name;
+        }
+    } else if (isFriday && activePrayer.name === "dhuhr") {
+        // 2. Jummah Friday Mode Sessions Countdown
+        // Parse configured Jummah Session times (e.g. "12:30 PM", "1:30 PM")
+        const sess1Time = parseTimeString(settings.jummahTime1, now);
+        const sess2Time = parseTimeString(settings.jummahTime2, now);
+        
+        if (sess1Time && nowMs < sess1Time.getTime()) {
+            // Counting down to Session 1
+            targetCountdownTime = sess1Time;
+            label = `🕌 Jummah Session 1`;
+        } else if (sess2Time && nowMs < sess2Time.getTime()) {
+            // Counting down to Session 2
+            targetCountdownTime = sess2Time;
+            label = `🕌 Jummah Session 2`;
+        }
     }
 
-    // Countdown formatting
     let diffMs = targetCountdownTime.getTime() - nowMs;
-    if (diffMs < 0 && !inIqamahWindow) {
-        // edge fallback
-        diffMs = 0;
-    }
+    if (diffMs < 0) diffMs = 0;
 
     const diffSecs = Math.floor(diffMs / 1000);
     const hrs = Math.floor(diffSecs / 3600);
@@ -339,12 +460,13 @@ function determineActiveAndNextPrayer(prayers, iqamahs, now, coordinates, params
     labelEl.textContent = label;
     valEl.textContent = countdownStr;
 
-    // Audio alarm alert when Iqamah timer hits zero
-    if (inIqamahWindow && diffSecs === 0) {
+    // --- Dimmer Overlay trigger when Iqamah reaches zero ---
+    if (inIqamahWindow && diffSecs === 0 && !isSalahOverlayActive) {
         triggerAudioAlert();
+        triggerSalahOverlay(currentSalahName);
     }
 
-    // Custom styling for active Iqamah countdown to flash/grab attention
+    // Toggle flash colors during Iqamah active countdown
     if (inIqamahWindow) {
         banner.style.border = "1px solid var(--accent-color)";
         banner.style.boxShadow = "0 0 25px var(--accent-glow)";
@@ -356,27 +478,96 @@ function determineActiveAndNextPrayer(prayers, iqamahs, now, coordinates, params
     }
 }
 
-// Play audio buzzer for congregational line-up
-function triggerAudioAlert() {
-    const beep = document.getElementById("beepAlert");
-    if (beep) {
-        beep.play().catch(e => console.log("Buzzer play blocked by browser autoplay rules. Interaction required.", e));
+// Convert "12:30 PM" to Date object helper
+function parseTimeString(timeStr, baseDate) {
+    if (!timeStr) return null;
+    try {
+        const clean = timeStr.trim().toUpperCase();
+        const parts = clean.match(/^(\d+):(\d+)\s*(AM|PM)$/);
+        if (!parts) return null;
+        
+        let hrs = parseInt(parts[1]);
+        const mins = parseInt(parts[2]);
+        const ampm = parts[3];
+        
+        if (ampm === "PM" && hrs < 12) hrs += 12;
+        if (ampm === "AM" && hrs === 12) hrs = 0;
+        
+        const date = new Date(baseDate.getTime());
+        date.setHours(hrs, mins, 0, 0);
+        return date;
+    } catch (e) {
+        return null;
     }
 }
 
-// Live Time & Dates display loop
+// Audio alert beep sound
+function triggerAudioAlert() {
+    const beep = document.getElementById("beepAlert");
+    if (beep) {
+        beep.play().catch(e => console.log("Buzzer blocked", e));
+    }
+}
+
+// Salah overlay activation
+function triggerSalahOverlay(salahName) {
+    isSalahOverlayActive = true;
+    salahTimeRemaining = (parseInt(settings.salahDuration) || 15) * 60;
+    
+    const overlay = document.getElementById("salahOverlay");
+    overlay.classList.add("open");
+    
+    updateSalahTimerUI();
+    
+    salahTimerInterval = setInterval(() => {
+        salahTimeRemaining--;
+        if (salahTimeRemaining <= 0) {
+            closeSalahOverlay();
+        } else {
+            updateSalahTimerUI();
+        }
+    }, 1000);
+}
+
+// Close Salah Dimmer Overlay
+function closeSalahOverlay() {
+    isSalahOverlayActive = false;
+    clearInterval(salahTimerInterval);
+    document.getElementById("salahOverlay").classList.remove("open");
+}
+
+// Update Salah duration text inside overlay
+function updateSalahTimerUI() {
+    const mins = Math.floor(salahTimeRemaining / 60);
+    const secs = salahTimeRemaining % 60;
+    document.getElementById("salahTimer").textContent = `Salah Ends in: ${pad(mins)}:${pad(secs)}`;
+}
+
+// Hook up event listeners for overlay dismissal
+function initSalahOverlayDismiss() {
+    // 1. Dimmer dismiss button
+    document.getElementById("salahDismissBtn").addEventListener("click", closeSalahOverlay);
+    
+    // 2. Dismiss via Escape key
+    window.addEventListener("keydown", (e) => {
+        if (e.key === "Escape" && isSalahOverlayActive) {
+            closeSalahOverlay();
+        }
+    });
+}
+
+// Live Time, Dates, and Hijri calibration calculations
 function updateTimeAndPrayers() {
-    // Current local time
     const now = new Date();
     
-    // Format Clock Display
+    // Format clock
     let hours = now.getHours();
     const minutes = now.getMinutes();
     const seconds = now.getSeconds();
     const ampm = hours >= 12 ? 'PM' : 'AM';
     
     hours = hours % 12;
-    hours = hours ? hours : 12; // 0 becomes 12
+    hours = hours ? hours : 12;
     
     document.getElementById("currentTime").textContent = `${pad(hours)}:${pad(minutes)}:${pad(seconds)}`;
     document.getElementById("currentAmPm").textContent = ampm;
@@ -385,21 +576,128 @@ function updateTimeAndPrayers() {
     const gregOptions = { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' };
     document.getElementById("gregorianDateDisplay").textContent = now.toLocaleDateString('en-US', gregOptions);
 
-    // Islamic Hijri Date via Intl API
+    // Calibrated Hijri Calendar Date
     try {
+        // Add manual Hijri offset configuration to dates
+        const hijriDate = new Date(now.getTime() + (parseInt(settings.hijriOffset) || 0) * 24 * 3600 * 1000);
         const hijriOptions = { calendar: 'islamic-umalqura', day: 'numeric', month: 'long', year: 'numeric' };
         const hijriFormatter = new Intl.DateTimeFormat('en-US-u-ca-islamic-umalqura', hijriOptions);
-        document.getElementById("hijriDateDisplay").textContent = hijriFormatter.format(now);
+        document.getElementById("hijriDateDisplay").textContent = hijriFormatter.format(hijriDate);
     } catch (e) {
         document.getElementById("hijriDateDisplay").textContent = "Islamic Calendar Error";
     }
 
-    // Recompute prayer calculations every second to keep next countdown smooth
+    // Run prayer schedule adjustments
     calculatePrayerTimes();
 }
 
 // ==========================================================================
-// Settings Dialog & Tab Interaction Logic
+// Weather Query Logic (Open-Meteo Integration)
+// ==========================================================================
+
+async function fetchWeather() {
+    // Prevent spam queries, throttle queries to once every 10 minutes
+    const nowMs = Date.now();
+    if (nowMs - weatherCache.lastUpdated < 600000 && weatherCache.temp !== "--") {
+        return;
+    }
+
+    let lat = parseFloat(settings.latitude);
+    let lng = parseFloat(settings.longitude);
+
+    if (settings.locationMode && settings.locationMode !== "custom" && settings.locationMode !== "auto") {
+        const preset = CITY_PRESETS[settings.locationMode];
+        if (preset) {
+            lat = preset.lat;
+            lng = preset.lng;
+        }
+    }
+
+    const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lng}&current_weather=true`;
+    
+    try {
+        const res = await fetch(url);
+        if (!res.ok) throw new Error("Weather fetch failed");
+        
+        const data = await res.json();
+        const cw = data.current_weather;
+        
+        weatherCache.temp = Math.round(cw.temperature);
+        weatherCache.lastUpdated = nowMs;
+        
+        // Map WMO codes to description and emoji
+        const wCode = cw.weathercode;
+        if (wCode === 0) {
+            weatherCache.desc = "Clear";
+            weatherCache.icon = "☀️";
+        } else if (wCode >= 1 && wCode <= 3) {
+            weatherCache.desc = "Partly Cloudy";
+            weatherCache.icon = "⛅";
+        } else if (wCode >= 45 && wCode <= 48) {
+            weatherCache.desc = "Foggy";
+            weatherCache.icon = "🌫️";
+        } else if (wCode >= 51 && wCode <= 65) {
+            weatherCache.desc = "Rainy";
+            weatherCache.icon = "🌧️";
+        } else if (wCode >= 71 && wCode <= 77) {
+            weatherCache.desc = "Snowy";
+            weatherCache.icon = "❄️";
+        } else if (wCode >= 80 && wCode <= 82) {
+            weatherCache.desc = "Showers";
+            weatherCache.icon = "🌧️";
+        } else if (wCode >= 95 && wCode <= 99) {
+            weatherCache.desc = "Stormy";
+            weatherCache.icon = "🌩️";
+        } else {
+            weatherCache.desc = "Cloudy";
+            weatherCache.icon = "☁️";
+        }
+        
+        updateWeatherUI();
+    } catch (e) {
+        console.warn("Unable to fetch weather (offline or API limit):", e);
+        // Keep cached version or display offline status
+        if (weatherCache.temp === "--") {
+            weatherCache.desc = "Offline";
+            weatherCache.icon = "⛅";
+            updateWeatherUI();
+        }
+    }
+}
+
+// Update weather widgets inside header
+function updateWeatherUI() {
+    const tempEl = document.querySelector(".weather-temp");
+    const descEl = document.querySelector(".weather-desc");
+    const iconEl = document.querySelector(".weather-icon");
+    
+    if (tempEl && descEl && iconEl) {
+        iconEl.textContent = weatherCache.icon;
+        tempEl.textContent = weatherCache.temp !== "--" ? `${weatherCache.temp}°C` : "";
+        descEl.textContent = weatherCache.desc;
+    }
+}
+
+// ==========================================================================
+// Slideshow Panel Cycler
+// ==========================================================================
+
+function initSlideshow() {
+    let currentSlide = 1;
+    const totalSlides = 4;
+    setInterval(() => {
+        // If Salah Overlay is active, pause slideshow calculations
+        if (isSalahOverlayActive) return;
+
+        document.querySelectorAll(".slide").forEach(s => s.classList.remove("active"));
+        currentSlide = (currentSlide % totalSlides) + 1;
+        const nextSlide = document.getElementById(`slide-${currentSlide}`);
+        if (nextSlide) nextSlide.classList.add("active");
+    }, 15000); // Rotate slides every 15 seconds
+}
+
+// ==========================================================================
+// Settings Drawer Form Management
 // ==========================================================================
 
 function initSettingsUI() {
@@ -409,7 +707,7 @@ function initSettingsUI() {
     const saveBtn = document.getElementById("saveSettingsBtn");
     const resetBtn = document.getElementById("resetSettingsBtn");
     
-    // Modal toggle
+    // Modal drawer opening
     openBtn.addEventListener("click", () => {
         loadSettingsToForm();
         modal.classList.add("open");
@@ -426,9 +724,12 @@ function initSettingsUI() {
         }
     });
 
-    // Hotkey: Press 'S' to open/close settings
+    // Keyboard Hotkeys: S to toggle settings
     window.addEventListener("keydown", (e) => {
         if (e.key.toLowerCase() === 's' && document.activeElement.tagName !== 'INPUT' && document.activeElement.tagName !== 'TEXTAREA') {
+            // Ignore if Salah Overlay is active
+            if (isSalahOverlayActive) return;
+
             if (modal.classList.contains("open")) {
                 modal.classList.remove("open");
             } else {
@@ -438,7 +739,7 @@ function initSettingsUI() {
         }
     });
 
-    // Settings tabs switcher
+    // Tabs switches
     const tabBtns = document.querySelectorAll(".tab-btn");
     const tabPanels = document.querySelectorAll(".tab-panel");
     tabBtns.forEach(btn => {
@@ -452,26 +753,18 @@ function initSettingsUI() {
         });
     });
 
-    // Theme Preset Selector logic
+    // Color theme logic selectors
     const themeSelect = document.getElementById("themePreset");
     const customColorsSec = document.getElementById("customColorsSection");
     themeSelect.addEventListener("change", (e) => {
-        if (e.target.value === "custom") {
-            customColorsSec.style.display = "block";
-        } else {
-            customColorsSec.style.display = "none";
-        }
+        customColorsSec.style.display = e.target.value === "custom" ? "block" : "none";
     });
 
-    // Wallpaper Preset logic
+    // Wallpaper Preset logic selectors
     const bgModeSelect = document.getElementById("bgImageMode");
     const customBgSec = document.getElementById("customBgUrlSection");
     bgModeSelect.addEventListener("change", (e) => {
-        if (e.target.value === "custom") {
-            customBgSec.style.display = "block";
-        } else {
-            customBgSec.style.display = "none";
-        }
+        customBgSec.style.display = e.target.value === "custom" ? "block" : "none";
     });
 
     // Location mode presets auto fill
@@ -486,7 +779,6 @@ function initSettingsUI() {
             detectGeoLocation();
         } else {
             coordSec.style.display = "none";
-            // Pre-fill coordinate boxes for visual feedback
             const city = CITY_PRESETS[val];
             if (city) {
                 document.getElementById("latInput").value = city.lat;
@@ -497,7 +789,7 @@ function initSettingsUI() {
         }
     });
 
-    // Live Announcements Textarea Preview
+    // Live announcements preview
     const tickerTextarea = document.getElementById("announcementTicker");
     const previewSpan = document.getElementById("tickerPreviewText");
     tickerTextarea.addEventListener("input", (e) => {
@@ -525,20 +817,43 @@ function initSettingsUI() {
         settings.calcMethod = document.getElementById("calcMethod").value;
         settings.madhab = document.getElementById("madhab").value;
         
+        // Save Iqamahs
         settings.iqamahOffsets.fajr = parseInt(document.getElementById("fajrIqamah").value) || 0;
         settings.iqamahOffsets.dhuhr = parseInt(document.getElementById("dhuhrIqamah").value) || 0;
         settings.iqamahOffsets.asr = parseInt(document.getElementById("asrIqamah").value) || 0;
         settings.iqamahOffsets.maghrib = parseInt(document.getElementById("maghribIqamah").value) || 0;
         settings.iqamahOffsets.isha = parseInt(document.getElementById("ishaIqamah").value) || 0;
 
+        // Save Salah & Jummah config
+        settings.salahDuration = parseInt(document.getElementById("salahDuration").value) || 15;
+        settings.jummahTime1 = document.getElementById("jummahTime1").value;
+        settings.jummahTime2 = document.getElementById("jummahTime2").value;
+
+        // Save Calibrations
+        settings.hijriOffset = parseInt(document.getElementById("hijriOffset").value) || 0;
+        settings.offsets.fajr = parseInt(document.getElementById("offsetFajr").value) || 0;
+        settings.offsets.sunrise = parseInt(document.getElementById("offsetSunrise").value) || 0;
+        settings.offsets.dhuhr = parseInt(document.getElementById("offsetDhuhr").value) || 0;
+        settings.offsets.asr = parseInt(document.getElementById("offsetAsr").value) || 0;
+        settings.offsets.maghrib = parseInt(document.getElementById("offsetMaghrib").value) || 0;
+        settings.offsets.isha = parseInt(document.getElementById("offsetIsha").value) || 0;
+
+        // Save Theme
         settings.themePreset = document.getElementById("themePreset").value;
         settings.customColors.primary = document.getElementById("colorPrimary").value;
         settings.customColors.accent = document.getElementById("colorAccent").value;
         settings.customColors.bg = document.getElementById("colorBg").value;
         
+        // Save bg image
         settings.bgImageMode = document.getElementById("bgImageMode").value;
         settings.customBgUrl = document.getElementById("customBgUrl").value;
         settings.announcements = document.getElementById("announcementTicker").value;
+        settings.urgentAlert = document.getElementById("urgentAlertField").value;
+
+        // Save slides configurations
+        settings.donationUrl = document.getElementById("donationUrlField").value || "https://linktr.ee/saliitcare";
+        settings.donationText = document.getElementById("donationTextField").value || "Your donations sustain our community. Scan to contribute.";
+        settings.classesText = document.getElementById("classesTextField").value || "Join Sali Islamic classes: Tafsir circle every Saturday after Asr.";
 
         saveSettings();
         applySettings();
@@ -554,7 +869,6 @@ function detectGeoLocation() {
     }
     
     document.getElementById("locationMode").value = "auto";
-    const statusText = "Detecting coordinates...";
     document.getElementById("latInput").value = "";
     document.getElementById("lngInput").value = "";
     
@@ -562,13 +876,11 @@ function detectGeoLocation() {
         (position) => {
             document.getElementById("latInput").value = position.coords.latitude.toFixed(4);
             document.getElementById("lngInput").value = position.coords.longitude.toFixed(4);
-            
-            // Auto calculate timezone offset in hours
             const offset = -new Date().getTimezoneOffset() / 60;
             document.getElementById("tzInput").value = offset;
         },
         (error) => {
-            alert(`Unable to retrieve location: ${error.message}. Defaulting coordinates.`);
+            alert(`Unable to retrieve location: ${error.message}. Defaulting.`);
             document.getElementById("locationMode").value = "custom";
             document.getElementById("latInput").value = DEFAULT_SETTINGS.latitude;
             document.getElementById("lngInput").value = DEFAULT_SETTINGS.longitude;
@@ -577,7 +889,7 @@ function detectGeoLocation() {
     );
 }
 
-// Pre-populate settings overlay form on open
+// Pre-populate settings form inputs on open
 function loadSettingsToForm() {
     document.getElementById("mosqueNameInput").value = settings.mosqueName;
     document.getElementById("locationMode").value = settings.locationMode;
@@ -593,6 +905,21 @@ function loadSettingsToForm() {
     document.getElementById("maghribIqamah").value = settings.iqamahOffsets.maghrib;
     document.getElementById("ishaIqamah").value = settings.iqamahOffsets.isha;
 
+    // Load Salah & Jummah
+    document.getElementById("salahDuration").value = settings.salahDuration;
+    document.getElementById("jummahTime1").value = settings.jummahTime1;
+    document.getElementById("jummahTime2").value = settings.jummahTime2;
+
+    // Load Calibrations
+    document.getElementById("hijriOffset").value = settings.hijriOffset;
+    document.getElementById("offsetFajr").value = settings.offsets.fajr;
+    document.getElementById("offsetSunrise").value = settings.offsets.sunrise;
+    document.getElementById("offsetDhuhr").value = settings.offsets.dhuhr;
+    document.getElementById("offsetAsr").value = settings.offsets.asr;
+    document.getElementById("offsetMaghrib").value = settings.offsets.maghrib;
+    document.getElementById("offsetIsha").value = settings.offsets.isha;
+
+    // Load Theme details
     document.getElementById("themePreset").value = settings.themePreset;
     document.getElementById("colorPrimary").value = settings.customColors.primary;
     document.getElementById("colorAccent").value = settings.customColors.accent;
@@ -601,6 +928,12 @@ function loadSettingsToForm() {
     document.getElementById("bgImageMode").value = settings.bgImageMode;
     document.getElementById("customBgUrl").value = settings.customBgUrl;
     document.getElementById("announcementTicker").value = settings.announcements;
+    document.getElementById("urgentAlertField").value = settings.urgentAlert;
+
+    // Load slides configurations
+    document.getElementById("donationUrlField").value = settings.donationUrl || "https://linktr.ee/saliitcare";
+    document.getElementById("donationTextField").value = settings.donationText || "Your donations sustain our community. Scan to contribute.";
+    document.getElementById("classesTextField").value = settings.classesText || "Join Sali Islamic classes: Tafsir circle every Saturday after Asr.";
 
     // Show/hide sections accordingly
     const customColorsSec = document.getElementById("customColorsSection");
